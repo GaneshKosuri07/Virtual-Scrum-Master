@@ -1,0 +1,195 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Soft slightly cool grayish background */
+    --background: 228 33% 97%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Premium Soft Indigo/Blue */
+    --primary: 236 85% 60%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 220 14% 94%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 224 71% 95%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Snappy status colors */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 69% 45%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 210 40% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 236 85% 60%;
+
+    /* Modern rounded radius */
+    --radius: 0.75rem;
+
+    --sidebar-bg: 0 0% 100%;
+    --sidebar-fg: 215 16% 47%;
+    --sidebar-active: 236 85% 60%;
+    --sidebar-active-fg: 210 40% 98%;
+    --sidebar-hover: 220 14% 96%;
+    --sidebar-border: 214 32% 91%;
+
+    /* Distinct but muted column backgrounds */
+    --kanban-backlog: 220 14% 96%;
+    --kanban-active: 236 85% 97%;
+    --kanban-review: 38 92% 95%;
+    --kanban-validation: 271 81% 97%;
+    --kanban-done: 142 69% 95%;
+    --kanban-blocked: 0 84% 96%;
+
+    --confidence-high: 142 69% 45%;
+    --confidence-medium: 38 92% 50%;
+    --confidence-low: 0 84% 60%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 215 16% 47%;
+    --sidebar-primary: 236 85% 60%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 224 71% 95%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-ring: 236 85% 60%;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 92%;
+
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 92%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 92%;
+
+    --primary: 236 85% 65%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 210 40% 92%;
+
+    --muted: 222 30% 16%;
+    --muted-foreground: 215 16% 56%;
+
+    --accent: 224 40% 18%;
+    --accent-foreground: 210 40% 92%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 69% 40%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 210 40% 98%;
+
+    --border: 222 30% 20%;
+    --input: 222 30% 20%;
+    --ring: 236 85% 65%;
+
+    --radius: 0.75rem;
+
+    --sidebar-bg: 222 47% 11%;
+    --sidebar-fg: 215 16% 56%;
+    --sidebar-active: 236 85% 65%;
+    --sidebar-active-fg: 210 40% 98%;
+    --sidebar-hover: 222 30% 16%;
+    --sidebar-border: 222 30% 20%;
+
+    --kanban-backlog: 222 30% 14%;
+    --kanban-active: 236 50% 15%;
+    --kanban-review: 38 40% 14%;
+    --kanban-validation: 271 40% 15%;
+    --kanban-done: 142 30% 13%;
+    --kanban-blocked: 0 40% 14%;
+
+    --confidence-high: 142 69% 40%;
+    --confidence-medium: 38 92% 50%;
+    --confidence-low: 0 72% 51%;
+
+    --sidebar-background: 222 47% 11%;
+    --sidebar-foreground: 215 16% 56%;
+    --sidebar-primary: 236 85% 65%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 224 40% 18%;
+    --sidebar-accent-foreground: 210 40% 92%;
+    --sidebar-border: 222 30% 20%;
+    --sidebar-ring: 236 85% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border) / 0.8);
+    border-radius: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+  /* Custom soft shadow */
+  .shadow-soft {
+    box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  }
+  .shadow-soft-hover {
+    box-shadow: 0 10px 30px -4px rgba(0, 0, 0, 0.08);
+  }
+  
+  /* Smooth transitions for all interactive elements */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Prevent layout shift during transitions */
+  .will-change-transform {
+    will-change: transform;
+  }
+}

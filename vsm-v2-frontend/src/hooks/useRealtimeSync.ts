@@ -1,0 +1,304 @@
+import { useEffect, useRef, useCallback } from 'react';
+import { useWorkflowStore } from '@/stores/workflowStore';
+import { useNotificationStore } from '@/stores/notificationStore';
+import { toast } from 'sonner';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const POLL_INTERVAL = 8_000; // 8s fallback polling
+const SSE_RETRY_DELAY = 5_000;
+
+interface RealtimeEvent {
+  type: string;
+  payload: any;
+  timestamp?: string;
+}
+
+/**
+ * Real-time sync hook: tries SSE first, falls back to smart polling.
+ * Updates Zustand stores directly when events arrive.
+ */
+export function useRealtimeSync(teamId: string | null, projectId: string | null) {
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortCtrlRef = useRef<AbortController | null>(null);
+  const lastPollRef = useRef<number>(0);
+  const isSSEConnected = useRef(false);
+
+  const handleEvent = useCallback((event: RealtimeEvent) => {
+    const store = useWorkflowStore.getState();
+    const notifStore = useNotificationStore.getState();
+
+    switch (event.type) {
+      case 'TASK_UPDATED':
+      case 'TASK_MOVED': {
+        const task = event.payload;
+        if (!task?.id) break;
+        // Update task in store without full refetch
+        const existing = store.tasks.find(t => String(t.id) === String(task.id));
+        if (existing) {
+          const stages = store.stages;
+          const newStage = stages.find(s => s.id === Number(task.status_id || task.currentStageId));
+          const updated = {
+            ...existing,
+            ...task,
+            status_id: task.status_id ?? existing.status_id,
+            currentStageId: task.currentStageId ?? task.status_id ?? existing.currentStageId,
+            status_name: newStage?.name || existing.status_name,
+            status_category: newStage?.systemCategory || existing.status_category,
+          };
+          useWorkflowStore.setState({
+            tasks: store.tasks.map(t => String(t.id) === String(task.id) ? updated : t),
+          });
+
+          // Show toast for AI-driven moves
+          if (event.payload._source === 'AI' || event.type === 'TASK_MOVED') {
+            const fromName = existing.status_name || 'Unknown';
+            const toName = newStage?.name || 'New Stage';
+            toast.info(`🤖 AI moved "${existing.title}"`, {
+              description: `${fromName} → ${toName}`,
+              duration: 5000,
+            });
+          }
+        } else {
+          // New task we don't have — append
+          useWorkflowStore.setState({ tasks: [...store.tasks, task] });
+        }
+        break;
+      }
+
+      case 'TASK_CREATED': {
+        const task = event.payload;
+        if (!task?.id) break;
+        const exists = store.tasks.some(t => String(t.id) === String(task.id));
+        if (!exists) {
+          useWorkflowStore.setState({ tasks: [...store.tasks, task] });
+        }
+        break;
+      }
+
+      case 'TASK_DELETED': {
+        const taskId = event.payload?.id || event.payload?.taskId;
+        if (taskId) {
+          useWorkflowStore.setState({
+            tasks: store.tasks.filter(t => String(t.id) !== String(taskId)),
+          });
+        }
+        break;
+      }
+
+      case 'AI_DECISION': {
+        const decision = event.payload;
+        if (decision) {
+          store.appendAIDecision(decision);
+          notifStore.addNotification({
+            type: 'ai_decision',
+            title: `AI Decision: ${decision.status}`,
+            message: decision.reasoning || 'AI made a workflow decision',
+            taskId: decision.taskId,
+            severity: decision.status === 'BLOCKED' ? 'critical' : 'info',
+          });
+
+          if (decision.status === 'PENDING_APPROVAL' || decision.status === 'PENDING_CONFIRMATION') {
+            toast.warning('🤖 AI needs your approval', {
+              description: decision.reasoning,
+              duration: 10000,
+            });
+          }
+        }
+        break;
+      }
+
+      case 'BLOCKER_DETECTED': {
+        const { taskId, reason } = event.payload || {};
+        notifStore.addNotification({
+          type: 'blocker',
+          title: 'Blocker Detected',
+          message: reason || 'A task has been flagged as blocked',
+          taskId,
+          severity: 'critical',
+        });
+        toast.error('🚫 Blocker detected', {
+          description: reason,
+          duration: 8000,
+        });
+        break;
+      }
+
+      case 'SPRINT_UPDATED': {
+        // Trigger sprint refetch
+        store.fetchSprints();
+        break;
+      }
+
+      default:
+        break;
+    }
+  }, []);
+
+  // Fallback: smart polling that diffs against current state
+  const poll = useCallback(async () => {
+    if (!teamId) return;
+    const now = Date.now();
+    if (now - lastPollRef.current < POLL_INTERVAL - 500) return;
+    lastPollRef.current = now;
+
+    try {
+      const { api } = await import('@/lib/api');
+      const [tasks, events] = await Promise.all([
+        api.listTasks(teamId),
+        api.getEventLog(teamId, 20),
+      ]);
+
+      const store = useWorkflowStore.getState();
+
+      // Diff tasks: only update changed ones to prevent flickering
+      const currentTaskMap = new Map(store.tasks.map(t => [String(t.id), t]));
+      let needsUpdate = false;
+      const mergedTasks = [...store.tasks];
+      const existingIds = new Set(store.tasks.map(t => String(t.id)));
+
+      for (const newTask of tasks as any[]) {
+        const existing = currentTaskMap.get(String(newTask.id));
+        if (!existing) {
+          // New task not in store
+          mergedTasks.push(newTask);
+          needsUpdate = true;
+        } else if (
+          existing.status_id !== newTask.status_id ||
+          existing.updatedAt !== newTask.updatedAt ||
+          existing.sprint_id !== newTask.sprint_id ||
+          existing.assignee_id !== newTask.assignee_id ||
+          existing.priority !== newTask.priority ||
+          existing.title !== newTask.title
+        ) {
+          // Task changed - update in place
+          const idx = mergedTasks.findIndex(t => String(t.id) === String(newTask.id));
+          if (idx >= 0) mergedTasks[idx] = { ...existing, ...newTask };
+          needsUpdate = true;
+        }
+      }
+
+      // Remove tasks that were deleted on server
+      const serverIds = new Set((tasks as any[]).map(t => String(t.id)));
+      const filtered = mergedTasks.filter(t => serverIds.has(String(t.id)));
+      if (filtered.length !== mergedTasks.length) needsUpdate = true;
+
+      if (needsUpdate) {
+        useWorkflowStore.setState({ tasks: filtered });
+      }
+
+      // Check for new AI decisions in events
+      const aiEvents = (events || []).filter((e: any) =>
+        e.event_type === 'AI_DECISION' || e.event_type === 'TASK_MOVED'
+      );
+      if (aiEvents.length > 0) {
+        const lastKnown = store.aiDecisions[0]?.createdAt;
+        const newEvents = lastKnown
+          ? aiEvents.filter((e: any) => new Date(e.created_at) > new Date(lastKnown))
+          : [];
+        newEvents.forEach((e: any) => {
+          handleEvent({ type: e.event_type, payload: e.metadata || e });
+        });
+      }
+    } catch {
+      // Silent fail on polling
+    }
+  }, [teamId, handleEvent]);
+
+  const startPolling = useCallback(() => {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(poll, POLL_INTERVAL);
+    // Immediate first poll
+    poll();
+  }, [poll]);
+
+  // Try SSE connection
+  const connectSSE = useCallback(() => {
+    if (!teamId) return;
+
+    const userId = localStorage.getItem('vsm_user_id');
+    const url = `${API_BASE}/events/stream?team_id=${teamId}${userId ? `&user_id=${userId}` : ''}`;
+
+    try {
+      const ENABLE_SSE = true;
+      if (!ENABLE_SSE) {
+        startPolling();
+        return;
+      }
+
+      if (abortCtrlRef.current) {
+        abortCtrlRef.current.abort();
+      }
+      abortCtrlRef.current = new AbortController();
+
+      fetchEventSource(url, {
+        method: 'GET',
+        headers: {
+          'ngrok-skip-browser-warning': 'true',
+          'Accept': 'text/event-stream'
+        },
+        signal: abortCtrlRef.current.signal,
+        async onopen(response) {
+          if (response.ok) {
+            isSSEConnected.current = true;
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+          }
+        },
+        onmessage(msg) {
+          try {
+            const data = JSON.parse(msg.data);
+            if (data.type === 'CONNECTED') {
+               // Initial ping
+               return;
+            }
+            handleEvent({ type: data.type, payload: data.payload });
+          } catch (e) {
+            console.error('Failed to parse SSE message:', e);
+          }
+        },
+        onclose() {
+          isSSEConnected.current = false;
+        },
+        onerror(err) {
+          isSSEConnected.current = false;
+          throw err; // throw to trigger reconnect logic in fetchEventSource
+        }
+      }).catch((err) => {
+        isSSEConnected.current = false;
+        startPolling();
+      });
+    } catch {
+      // SSE not supported or endpoint doesn't exist — use polling
+      startPolling();
+    }
+  }, [teamId, handleEvent, startPolling]);
+
+  useEffect(() => {
+    if (!teamId) return;
+
+    // Fetch historical notifications immediately
+    useNotificationStore.getState().fetchNotifications(teamId);
+
+    // Try SSE, will fall back to polling if it fails
+    connectSSE();
+    // Also start polling as immediate backup until SSE connects
+    if (!isSSEConnected.current) {
+      startPolling();
+    }
+
+    return () => {
+      if (abortCtrlRef.current) {
+        abortCtrlRef.current.abort();
+        abortCtrlRef.current = null;
+      }
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+      isSSEConnected.current = false;
+    };
+  }, [teamId, connectSSE, startPolling]);
+}
